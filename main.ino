@@ -106,14 +106,14 @@ void loop(){
   // int right2Switch = readChannel(9, false);
   int right3Switch = readChannel(10, false);
 
-  // long hookControl = remapControlValues(leftBumper, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
-  // long clawControl = remapControlValues(rightBumper, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
-  long armControl = remapControlValues(right3Switch, DEFAULT_CHANNEL_LIMITS, DISCRETE_ZERO_RANGE, PLUS_MINUS_ONE);
+  // double hookControl = remapControlValues(leftBumper, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
+  // double clawControl = remapControlValues(rightBumper, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
+  double armControl = remapControlValues(right3Switch, DEFAULT_CHANNEL_LIMITS, DISCRETE_ZERO_RANGE, PLUS_MINUS_ONE);
   int armIncrement = round(armControl);
-  // long speedControl = remapControlValues(rightVert, DEFAULT_CHANNEL_LIMITS, rightVertZero, ZERO_TO_ONE);
+  // double speedControl = remapControlValues(rightVert, DEFAULT_CHANNEL_LIMITS, rightVertZero, ZERO_TO_ONE);
   // int rightVertZero[] = {1000, 1100};
-  // long directionControl = remapControlValues(leftVert, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
-  // long turningControl = remapControlValues(leftHorz, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
+  // double directionControl = remapControlValues(leftVert, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
+  // double turningControl = remapControlValues(leftHorz, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
 
   incrementServoAngle(armStruct, armIncrement);
   delay(15);
@@ -151,22 +151,22 @@ void testServo(Servo servo){
   delay(1000); // wait for one second
 }
 
-long remapControlValues(int input, int inLimits[2], int zeroRange[2], int mode) {
+double remapControlValues(int input, int inLimits[2], int zeroRange[2], int mode) {
   if (input > zeroRange[0] && input < zeroRange[1]) return 0;
   
   if (mode == PLUS_MINUS_ONE) {
     if (input <= zeroRange[0]) {
-      long output = map(input, inLimits[0], zeroRange[0], -1, 0);
+      double output = map(input, inLimits[0], zeroRange[0], -1, 0);
       if (output < -1) output = -1;
       if (output > 0) output = 0;
     }
     else {
-      long output = map(input, zeroRange[1], inLimits[1], 0, 1);
+      double output = map(input, zeroRange[1], inLimits[1], 0, 1);
       if (output < 0) output = 0;
       if (output > 1) output = 1;
     }
   } else if (mode == ZERO_TO_ONE) {
-      long output = map(input, zeroRange[1], inLimits[1], 0, 1);
+      double output = map(input, zeroRange[1], inLimits[1], 0, 1);
       if (output < 0) output = 0;
       if (output > 1) output = 1;
   }
@@ -184,33 +184,44 @@ void incrementServoAngle(ServoStruct servoStruct, int angleDifference) {
   servoStruct.servo.write(targetAngle);
 }
 
-void move(int dirVal, int speedVal, int turnVal) {
-    int leftSpeed;
-    int rightSpeed;
-    int turnSpeed;
+void move(double dirVal, double speedVal, double turnVal) {
+  // dirVal - Backwards or forwards. -1 to 1; magnitude indicates speed
+  // speedVal - Maximum speed. 0 to 1
+  // turnVal - Determines motor speed offsets.
 
-    leftSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
-    rightSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
+  int rightSpeed;
+  int leftSpeed;
 
-    if (turnVal >= 1000 and turnVal < 1400){
-    turnSpeed = map(turnVal, 1400, 1000, 0, 127);
-    leftSpeed = abs(leftSpeed + (-2 * dirVal + 1)*turnSpeed);
-    rightSpeed = abs(rightSpeed + (2 * dirVal - 1)*turnSpeed);
-    }
-    else if (turnVal <= 2000 and turnVal > 1600){
-    turnSpeed = map(turnVal, 1600, 2000, 0, 127);
-    leftSpeed = abs(leftSpeed + (2 * dirVal - 1)*turnSpeed);
-    rightSpeed = abs(rightSpeed + (-2 * dirVal + 1)*turnSpeed);
-    }
-    else{
-    leftSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
-    rightSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
-    }
+  if (speedVal == 0 || dirVal == 0) {
+    rightStop();
+    leftStop();
+    return;
+  }
 
-    if(leftSpeed > 255){leftSpeed = 255;}
-    if(rightSpeed > 255){rightSpeed = 255;}
-    analogWrite(L_EN, leftSpeed);
-    analogWrite(R_EN, rightSpeed);
+  if (dirVal < 0) {
+    rightBwd();
+    leftBwd();
+  }
+  if (dirVal > 0) {
+    rightFwd();
+    leftFwd();
+  }
+
+  if (turnVal < 0) {
+    rightSpeed = abs(dirVal * speedVal);
+    leftSpeed = abs(1 - (abs(turnVal)) * dirVal * speedVal);
+  }
+
+  if (turnVal > 0) {
+    leftSpeed = abs(1 - (abs(turnVal)) * dirVal * speedVal);
+    rightSpeed = abs(dirVal * speedVal);
+  }
+
+  leftSpeed *= 255;
+  rightSpeed *= 255;
+
+  analogWrite(L_ENPIN, leftSpeed);
+  analogWrite(R_ENPIN, rightSpeed);
 }
 
 void leftFwd() {
