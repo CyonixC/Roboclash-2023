@@ -28,17 +28,30 @@ Servo TestServo;
 
 const int DEFAULT_MAX_SPEED = 3;
 
+// Servo starting positions
+const int HOOK_STARTING = 0;
+const int CLAW_STARTING = 0;
+const int ARM_STARTING = 0;
+
 //Controller settings
 byte interruptPin = 9;
 byte channelAmount = 8;
 PPMReader ppm(interruptPin, channelAmount);
+int DEFAULT_CHANNEL_LIMITS[] = {1000, 1984};
 
 // Servo structs
 struct ServoStruct {
   Servo servo;
   int angle;
   int maxSpeed;
+  int minAngle;
+  int maxAngle;
 };
+
+int PLUS_MINUS_ONE = 0;
+int ZERO_TO_ONE = 1;
+int ANALOG_ZERO_RANGE[] = {1400, 1600};
+int DISCRETE_ZERO_RANGE[] = {1250, 1750};
 
 // struct ServoController {
 //   ServoStruct servo1;
@@ -56,12 +69,10 @@ void setup(){
   ClawServo.attach(CLAW_PIN);
   // TestServo.attach(TEST_SERVO);
 
-  // Reset all motors to 0 position
-  HookServo.write(0);
-  ClawArmServo.write(0);
-  ClawServo.write(0);
-
-  // ServoController servoController = {hookStruct, armStruct, clawStruct, 0, 0, 0};
+  // Reset all motors to starting position
+  HookServo.write(HOOK_STARTING);
+  ClawArmServo.write(ARM_STARTING);
+  ClawServo.write(CLAW_STARTING);
 
   // Set L298N motor pins to OUTPUT
   pinMode(L_FWDPIN, OUTPUT);
@@ -71,15 +82,17 @@ void setup(){
   pinMode(R_FWDPIN, OUTPUT);
   pinMode(R_BWDPIN, OUTPUT);
   pinMode(R_ENPIN, OUTPUT);
-  pinMode(2, INPUT);
+  
+  // Array of motor pins for easier passing to functions
+  int motorPins[] = {L_FWDPIN, L_BWDPIN, L_ENPIN, R_FWDPIN, R_BWDPIN, R_ENPIN};
 
   // Start serial comms
   Serial.begin(BAUD_RATE);
 }
 
-ServoStruct hookStruct = {HookServo, 0, DEFAULT_MAX_SPEED};
-ServoStruct armStruct = {ClawArmServo, 0, DEFAULT_MAX_SPEED};
-ServoStruct clawStruct = {ClawServo, 0, DEFAULT_MAX_SPEED};
+ServoStruct hookStruct = {HookServo, HOOK_STARTING, DEFAULT_MAX_SPEED, 0, 120};
+ServoStruct armStruct = {ClawArmServo, ARM_STARTING, DEFAULT_MAX_SPEED, 0, 120};
+ServoStruct clawStruct = {ClawServo, CLAW_STARTING, DEFAULT_MAX_SPEED, 0, 120};
 
 void loop(){
   // Controller channels, comment out the ones we don't need!
@@ -93,15 +106,16 @@ void loop(){
   // int right2Switch = readChannel(9, false);
   int right3Switch = readChannel(10, false);
 
-  // long hookControl = map(leftBumper, 1000, 2000, -1, 1);
-  // long clawControl = map(rightBumper, 1000, 2000, -1, 1);
-  long armControl = map(right3Switch, 1000, 2000, -1, 1);
-  armControl = round(armControl);
-  // long speedControl = map(rightVert, 1000, 2000, 0, 1);
-  // long directionControl = map(leftVert, 1000, 2000, -1, 1);
-  // long turningControl = map(leftHorz, 1000, 2000, -1, 1);
+  // long hookControl = remapControlValues(leftBumper, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
+  // long clawControl = remapControlValues(rightBumper, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
+  long armControl = remapControlValues(right3Switch, DEFAULT_CHANNEL_LIMITS, DISCRETE_ZERO_RANGE, PLUS_MINUS_ONE);
+  int armIncrement = round(armControl);
+  // long speedControl = remapControlValues(rightVert, DEFAULT_CHANNEL_LIMITS, rightVertZero, ZERO_TO_ONE);
+  // int rightVertZero[] = {1000, 1100};
+  // long directionControl = remapControlValues(leftVert, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
+  // long turningControl = remapControlValues(leftHorz, DEFAULT_CHANNEL_LIMITS, ANALOG_ZERO_RANGE, PLUS_MINUS_ONE);
 
-  incrementServoAngle(armStruct, armControl, 180, 0);
+  incrementServoAngle(armStruct, armIncrement);
   delay(15);
 }
 
@@ -113,20 +127,17 @@ void loop(){
 // Custom Functions below
 // ----------------------
 
-
-
-
 void debugChannels() {
-    int rightHorz = readChannel(1, true);
-    int leftVert = readChannel(2, true);
-    int rightVert = readChannel(3, true);
-    int leftHorz = readChannel(4, true);
-    int leftBumper = readChannel(6, true);
-    int rightBumper = readChannel(7, true);
-    int left3Switch = readChannel(8, true);
-    int right2Switch = readChannel(9, true);
-    Serial.println("");
-    delay(3000);
+  int rightHorz = readChannel(1, true);
+  int leftVert = readChannel(2, true);
+  int rightVert = readChannel(3, true);
+  int leftHorz = readChannel(4, true);
+  int leftBumper = readChannel(6, true);
+  int rightBumper = readChannel(7, true);
+  int left3Switch = readChannel(8, true);
+  int right2Switch = readChannel(9, true);
+  Serial.println("");
+  delay(3000);
 }
 
 void testServo(Servo servo){
@@ -140,49 +151,60 @@ void testServo(Servo servo){
   delay(1000); // wait for one second
 }
 
-void setServoAngle(ServoStruct servoStruct, int targetAngle) {
-  // Incomplete!!!
-  int speedLimit = servoStruct.maxSpeed;
-  int currentAngle = servoStruct.angle;
-  Servo servo = servoStruct.servo;
-  for (int angle = currentAngle; angle <= targetAngle; angle += speedLimit) {
-    servo.write(angle);
-    delay(15);
+long remapControlValues(int input, int inLimits[2], int zeroRange[2], int mode) {
+  if (input > zeroRange[0] && input < zeroRange[1]) return 0;
+  
+  if (mode == PLUS_MINUS_ONE) {
+    if (input <= zeroRange[0]) {
+      long output = map(input, inLimits[0], zeroRange[0], -1, 0);
+      if (output < -1) output = -1;
+      if (output > 0) output = 0;
+    }
+    else {
+      long output = map(input, zeroRange[1], inLimits[1], 0, 1);
+      if (output < 0) output = 0;
+      if (output > 1) output = 1;
+    }
+  } else if (mode == ZERO_TO_ONE) {
+      long output = map(input, zeroRange[1], inLimits[1], 0, 1);
+      if (output < 0) output = 0;
+      if (output > 1) output = 1;
   }
 }
 
-// void remapControls(int input, int )
-
-void incrementServoAngle(ServoStruct servoStruct, int angleDifference, int maxAngle, int minAngle) {
+void incrementServoAngle(ServoStruct servoStruct, int angleDifference) {
   int speedLimit = servoStruct.maxSpeed;
   int currentAngle = servoStruct.angle;
   int targetAngle = currentAngle + angleDifference;
+  int minAngle = servoStruct.minAngle;
+  int maxAngle = servoStruct.maxAngle;
+
   if (targetAngle > maxAngle) {targetAngle = maxAngle;}
   if (targetAngle < minAngle) {targetAngle = minAngle;}
   servoStruct.servo.write(targetAngle);
 }
 
-void move(bool dir, int throttleVal, int steeringVal, int leftLimit, int rightLimit, int L_EN, int R_EN) {
+void move(int dirVal, int speedVal, int turnVal) {
     int leftSpeed;
     int rightSpeed;
     int turnSpeed;
 
-    leftSpeed = map(throttleVal, leftLimit, rightLimit, 127, 255);
-    rightSpeed = map(throttleVal, leftLimit, rightLimit, 127, 255);
+    leftSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
+    rightSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
 
-    if (steeringVal >= 1000 and steeringVal < 1400){
-    turnSpeed = map(steeringVal, 1400, 1000, 0, 127);
-    leftSpeed = abs(leftSpeed + (-2 * dir + 1)*turnSpeed);
-    rightSpeed = abs(rightSpeed + (2 * dir - 1)*turnSpeed);
+    if (turnVal >= 1000 and turnVal < 1400){
+    turnSpeed = map(turnVal, 1400, 1000, 0, 127);
+    leftSpeed = abs(leftSpeed + (-2 * dirVal + 1)*turnSpeed);
+    rightSpeed = abs(rightSpeed + (2 * dirVal - 1)*turnSpeed);
     }
-    else if (steeringVal <= 2000 and steeringVal > 1600){
-    turnSpeed = map(steeringVal, 1600, 2000, 0, 127);
-    leftSpeed = abs(leftSpeed + (2 * dir - 1)*turnSpeed);
-    rightSpeed = abs(rightSpeed + (-2 * dir + 1)*turnSpeed);
+    else if (turnVal <= 2000 and turnVal > 1600){
+    turnSpeed = map(turnVal, 1600, 2000, 0, 127);
+    leftSpeed = abs(leftSpeed + (2 * dirVal - 1)*turnSpeed);
+    rightSpeed = abs(rightSpeed + (-2 * dirVal + 1)*turnSpeed);
     }
     else{
-    leftSpeed = map(throttleVal, leftLimit, rightLimit, 127, 255);
-    rightSpeed = map(throttleVal, leftLimit, rightLimit, 127, 255);
+    leftSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
+    rightSpeed = map(speedVal, leftLimit, rightLimit, 127, 255);
     }
 
     if(leftSpeed > 255){leftSpeed = 255;}
